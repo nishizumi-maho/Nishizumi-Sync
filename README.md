@@ -36,13 +36,15 @@ This repository provides Python script `nishizumi_setups_sync.py` to copy iRacin
   type instead.
 - Optionally create driver-specific folders in the destination. When enabled,
   setups are synced to a `Common Setups` folder and to each named driver folder
-  without overwriting the drivers' custom versions.
+  without overwriting the drivers' custom versions, or only to the driver folders
+  when the *Drivers only* option is selected.
 - When driver folders are active, imported setups and any extra sync folders are
   automatically copied into each driver directory and the `Common Setups`
-  folder.
+  folder, or just the driver directories if *Drivers only* is enabled.
 - When driver folders are active, any `Data packs` subfolder found inside the
   sync source is merged into each driver directory and the `Common Setups`
-  folder instead of being copied separately.
+  folder instead of being copied separately, or only into the driver directories
+  when using *Drivers only*.
 - Optional Garage61 integration can fetch the list of drivers from the
   Garage61 API so driver folders are created and removed automatically.
 - When an unknown car folder is detected while running the GUI,
@@ -184,7 +186,8 @@ not exist.
   into the driver and common directories instead of being copied separately.
   Name only.
 * **Driver Folders** – sync setups to a common folder and optionally to each
-  driver’s personal folder.
+  driver’s personal folder, or only to the driver folders when *Drivers only* is
+  enabled.
 * **Use Garage61 API for drivers** – when enabled, the driver list is fetched
   from the Garage61 service. Provide your team ID and optional API key.
 * **Garage61 Team ID** – identifier of your team on Garage61.
@@ -193,6 +196,8 @@ not exist.
   managed automatically.
 * **Manually write drivers names** – copy setups to a shared `Common Setups`
   folder and to each driver name without overwriting their custom versions.
+* **Drivers only (no Common Setups)** – copy setups exclusively to each driver
+  folder and skip creating the `Common Setups` directory.
 * **Number of drivers** – how many driver folders to create when manual entry is
   enabled (up to 1000).
 * **Driver N Name** – text fields for each driver folder name. Use names only.

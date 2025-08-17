@@ -75,6 +75,7 @@ DEFAULT_CONFIG = {
     "copy_all": False,
     "use_driver_folders": False,
     "drivers": [],
+    "drivers_only": False,
     "use_garage61": False,
     "garage61_team_id": "",
     "garage61_api_key": "",
@@ -432,12 +433,14 @@ def sync_team_folders(
     copy_all=False,
     drivers=None,
     driver_style=False,
+    drivers_only=False,
 ):
     """Copy source subfolder ``src_name`` to ``dest_name`` for each car.
 
     When ``drivers`` is provided, files are synced to ``<dest>/Common Setups``
     and new files are copied into ``<dest>/Drivers/<name>`` without overwriting
-    existing ones.
+    existing ones. If ``drivers_only`` is ``True`` the common folder is skipped
+    and files are copied only to driver directories.
     """
     for car in os.listdir(iracing_folder):
         car_dir = os.path.join(iracing_folder, car)
@@ -451,7 +454,7 @@ def sync_team_folders(
         if drivers and driver_style:
             src_common = os.path.join(src, COMMON_FOLDER)
             src_dp = os.path.join(src, "Data packs")
-            if os.path.exists(src_common):
+            if not drivers_only and os.path.exists(src_common):
                 common = os.path.join(dest_root, COMMON_FOLDER)
                 sync_folders(src_common, common, algorithm, copy_all=copy_all)
             for name in drivers:
@@ -459,17 +462,18 @@ def sync_team_folders(
                 target = os.path.join(dest_root, DRIVERS_ROOT, name)
                 if os.path.exists(sdriver):
                     copy_missing_files(sdriver, target, copy_all)
-                elif os.path.exists(src_common):
+                elif not drivers_only and os.path.exists(src_common):
                     copy_missing_files(src_common, target, copy_all)
             if os.path.isdir(src_dp):
-                common_dp = os.path.join(dest_root, COMMON_FOLDER, "Data packs")
-                sync_folders(
-                    src_dp,
-                    common_dp,
-                    algorithm,
-                    delete_extras=False,
-                    copy_all=copy_all,
-                )
+                if not drivers_only:
+                    common_dp = os.path.join(dest_root, COMMON_FOLDER, "Data packs")
+                    sync_folders(
+                        src_dp,
+                        common_dp,
+                        algorithm,
+                        delete_extras=False,
+                        copy_all=copy_all,
+                    )
                 for name in drivers:
                     dp_dst = os.path.join(
                         dest_root,
@@ -489,8 +493,9 @@ def sync_team_folders(
             if os.path.isdir(dp_root):
                 shutil.rmtree(dp_root, ignore_errors=True)
         elif drivers:
-            common = os.path.join(dest_root, COMMON_FOLDER)
-            sync_folders(src, common, algorithm, copy_all=copy_all)
+            if not drivers_only:
+                common = os.path.join(dest_root, COMMON_FOLDER)
+                sync_folders(src, common, algorithm, copy_all=copy_all)
             for name in drivers:
                 dpath = os.path.join(dest_root, DRIVERS_ROOT, name)
                 copy_missing_files(src, dpath, copy_all)
@@ -523,6 +528,7 @@ def merge_external_into_source(
     copy_all=False,
     drivers=None,
     driver_style=False,
+    drivers_only=False,
 ):
     """Copy one or more external folders into the source folder for each car.
 
@@ -532,7 +538,8 @@ def merge_external_into_source(
 
     Each folder is merged into ``<car>/<src_name>/<name>`` without deleting
     existing files. When ``driver_style`` is ``True`` the folders are also
-    copied into ``Common Setups`` and each driver directory inside ``src_name``.
+    copied into ``Common Setups`` and each driver directory inside ``src_name``
+    unless ``drivers_only`` is ``True``.
     """
     if isinstance(ext_names, str):
         ext_names = [{"name": ext_names, "location": "car"}]
@@ -566,14 +573,17 @@ def merge_external_into_source(
             if not os.path.exists(ext):
                 continue
             if driver_style and drivers is not None:
-                common_dst = os.path.join(car_dir, src_name, COMMON_FOLDER, folder_name)
-                sync_folders(
-                    ext,
-                    common_dst,
-                    algorithm,
-                    delete_extras=False,
-                    copy_all=copy_all,
-                )
+                if not drivers_only:
+                    common_dst = os.path.join(
+                        car_dir, src_name, COMMON_FOLDER, folder_name
+                    )
+                    sync_folders(
+                        ext,
+                        common_dst,
+                        algorithm,
+                        delete_extras=False,
+                        copy_all=copy_all,
+                    )
                 for driver_name in drivers:
                     dst = os.path.join(
                         car_dir,
@@ -643,7 +653,12 @@ def sync_group_folders(
 
 
 def sync_nascar_source_folders(
-    iracing_folder, src_name, algorithm="md5", drivers=None, driver_style=False
+    iracing_folder,
+    src_name,
+    algorithm="md5",
+    drivers=None,
+    driver_style=False,
+    drivers_only=False,
 ):
     """Synchronise the source folder across all cars in each NASCAR group."""
     for group in [
@@ -653,19 +668,37 @@ def sync_nascar_source_folders(
         "superformula sf23",
     ]:
         cars = CAR_GROUPS.get(group, [])
-        paths = []
-        for car in cars:
-            base = os.path.join(iracing_folder, car, src_name)
-            if driver_style and drivers is not None:
-                common = os.path.join(base, COMMON_FOLDER)
-                if os.path.exists(common):
-                    paths.append(common)
+        if driver_style and drivers is not None:
+            if drivers_only:
+                for name in drivers:
+                    paths = []
+                    for car in cars:
+                        base = os.path.join(
+                            iracing_folder, car, src_name, DRIVERS_ROOT, name
+                        )
+                        if os.path.exists(base):
+                            paths.append(base)
+                    for i in range(len(paths)):
+                        for j in range(i + 1, len(paths)):
+                            sync_bidirectional(paths[i], paths[j], algorithm)
             else:
+                paths = []
+                for car in cars:
+                    common = os.path.join(iracing_folder, car, src_name, COMMON_FOLDER)
+                    if os.path.exists(common):
+                        paths.append(common)
+                for i in range(len(paths)):
+                    for j in range(i + 1, len(paths)):
+                        sync_bidirectional(paths[i], paths[j], algorithm)
+        else:
+            paths = []
+            for car in cars:
+                base = os.path.join(iracing_folder, car, src_name)
                 if os.path.exists(base):
                     paths.append(base)
-        for i in range(len(paths)):
-            for j in range(i + 1, len(paths)):
-                sync_bidirectional(paths[i], paths[j], algorithm)
+            for i in range(len(paths)):
+                for j in range(i + 1, len(paths)):
+                    sync_bidirectional(paths[i], paths[j], algorithm)
 
 
 def sync_nascar_data_packs(iracing_folder, dest_name, algorithm="md5"):
@@ -878,6 +911,7 @@ def copy_from_source(source, iracing_folder, cfg, ask=False):
             copy_missing_files(src_path, dest, cfg.get("copy_all", False))
 
     driver_mode = cfg.get("use_driver_folders")
+    drivers_only = cfg.get("drivers_only", False)
     drivers = [clean_name(n) for n in cfg.get("drivers", [])] if driver_mode else []
 
     for folder in subfolders:
@@ -899,8 +933,9 @@ def copy_from_source(source, iracing_folder, cfg, ask=False):
         if driver_mode:
             # Copy to Common and each driver folder
             for base in [personal_base, team_base]:
-                common = os.path.join(base, COMMON_FOLDER, supplier, season)
-                _import_dir(src_path, common, overwrite=True)
+                if not drivers_only:
+                    common = os.path.join(base, COMMON_FOLDER, supplier, season)
+                    _import_dir(src_path, common, overwrite=True)
                 for name in drivers:
                     dpath = os.path.join(
                         base,
@@ -974,6 +1009,7 @@ def perform_sync(ir_folder, cfg):
                 else None
             ),
             driver_style=cfg.get("use_driver_folders", False),
+            drivers_only=cfg.get("drivers_only", False),
         )
 
     drivers = (
@@ -981,6 +1017,7 @@ def perform_sync(ir_folder, cfg):
         if cfg.get("use_driver_folders")
         else None
     )
+    drivers_only = cfg.get("drivers_only", False)
     if drivers is not None:
         remove_unknown_driver_folders(ir_folder, dst_name, drivers)
 
@@ -990,6 +1027,7 @@ def perform_sync(ir_folder, cfg):
         cfg["hash_algorithm"],
         drivers=drivers,
         driver_style=cfg.get("use_driver_folders", False),
+        drivers_only=drivers_only,
     )
     sync_team_folders(
         ir_folder,
@@ -999,6 +1037,7 @@ def perform_sync(ir_folder, cfg):
         cfg.get("copy_all", False),
         drivers,
         driver_style=cfg.get("use_driver_folders", False),
+        drivers_only=drivers_only,
     )
     if not cfg.get("use_driver_folders"):
         sync_data_pack_folders(
@@ -1402,6 +1441,11 @@ def main():
             self.driver_check.setChecked(self.cfg.get("use_driver_folders", False))
             d_layout.addWidget(self.driver_check)
             self.driver_check.toggled.connect(self.update_garage_fields)
+            self.drivers_only_check = QtWidgets.QCheckBox(
+                "Drivers only (no Common Setups)"
+            )
+            self.drivers_only_check.setChecked(self.cfg.get("drivers_only", False))
+            d_layout.addWidget(self.drivers_only_check)
             d_layout.addWidget(QtWidgets.QLabel("Number of drivers"))
             self.driver_count_spin = QtWidgets.QSpinBox()
             # Allow a very large number of drivers to be configured
@@ -1588,6 +1632,12 @@ def main():
             self.driver_count_spin.setEnabled(
                 self.driver_check.isChecked() and not use_api
             )
+            self.drivers_only_check.setVisible(
+                self.driver_check.isChecked() or use_api
+            )
+            self.drivers_only_check.setEnabled(
+                self.driver_check.isChecked() or use_api
+            )
             self.update_driver_fields()
 
         def update_mode_fields(self):
@@ -1648,7 +1698,9 @@ def main():
                     if e.text().strip()
                 ],
                 "copy_all": self.copy_all_check.isChecked(),
-                "use_driver_folders": self.driver_check.isChecked(),
+                "use_driver_folders": self.driver_check.isChecked()
+                or self.garage_check.isChecked(),
+                "drivers_only": self.drivers_only_check.isChecked(),
                 "drivers": [
                     clean_name(e.text())
                     for _, e in self.driver_entries
