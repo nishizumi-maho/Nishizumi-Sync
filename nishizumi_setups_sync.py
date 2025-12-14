@@ -201,6 +201,26 @@ def calc_hash(path, algorithm="md5"):
         return None
 
 
+def files_differ(src, dst, algorithm="md5"):
+    """Return ``True`` if files at ``src`` and ``dst`` are different."""
+
+    try:
+        src_stat = os.stat(src)
+        dst_stat = os.stat(dst)
+    except OSError:
+        # If one file is missing or inaccessible, treat them as different
+        return True
+
+    if src_stat.st_size != dst_stat.st_size:
+        return True
+
+    if src_stat.st_mtime == dst_stat.st_mtime:
+        return False
+
+    # Same size but different timestamps: fall back to hashing to confirm
+    return calc_hash(src, algorithm) != calc_hash(dst, algorithm)
+
+
 def log(msg, cfg=None):
     """Print and optionally write a message to a log file."""
     print(msg)
@@ -320,9 +340,7 @@ def sync_bidirectional(dir_a, dir_b, algorithm="md5"):
         if os.path.isdir(pa):
             sync_bidirectional(pa, pb, algorithm)
         else:
-            ha = calc_hash(pa, algorithm)
-            hb = calc_hash(pb, algorithm)
-            if ha and hb and ha != hb:
+            if files_differ(pa, pb, algorithm):
                 if os.path.getmtime(pa) >= os.path.getmtime(pb):
                     copy_entry(pa, pb)
                 else:
@@ -373,7 +391,7 @@ def sync_folders(
         if not os.path.exists(d):
             copy = True
         else:
-            if calc_hash(s, algorithm) != calc_hash(d, algorithm):
+            if files_differ(s, d, algorithm):
                 copy = True
         if copy:
             shutil.copy2(s, d)
