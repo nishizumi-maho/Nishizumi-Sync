@@ -5,6 +5,7 @@ synchronises them between personal and team directories. It can run silently on
 startup and supports optional Garage61 integration and backup features.
 """
 
+import copy
 import os
 import sys
 import zipfile
@@ -90,11 +91,12 @@ DEFAULT_CONFIG = {
 }
 
 
-def load_config():
-    cfg = DEFAULT_CONFIG.copy()
-    if os.path.exists(CONFIG_FILE):
+def load_config(path=CONFIG_FILE):
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
+    cfg["_config_path"] = path
+    if os.path.exists(path):
         try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict):
                     if "supplier_folder" not in data and "driver_folder" in data:
@@ -144,8 +146,9 @@ def load_config():
     return cfg
 
 
-def save_config(cfg):
+def save_config(cfg, path=None):
     try:
+        target = path or cfg.get("_config_path", CONFIG_FILE)
         cfg.pop("external_folder", None)
         cfg.pop("backup_folder", None)
         cfg.setdefault("backup_before_folder", "")
@@ -178,7 +181,8 @@ def save_config(cfg):
         cfg["profiles"] = profiles
         # ensure legacy key is saved for backward compatibility
         cfg["driver_folder"] = cfg.get("supplier_folder", "")
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        cfg.setdefault("_config_path", target)
+        with open(target, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=4)
     except Exception:
         pass
@@ -1086,8 +1090,17 @@ def run_tray(cfg, MainWindow):
     app.exec()
 
 
+def _cli_config_path(default=CONFIG_FILE):
+    if "--config" in sys.argv:
+        idx = sys.argv.index("--config")
+        if idx + 1 < len(sys.argv):
+            return sys.argv[idx + 1]
+    return default
+
+
 def main():
-    cfg = load_config()
+    cfg_path = _cli_config_path()
+    cfg = load_config(cfg_path)
     if "--silent" in sys.argv or (
         cfg.get("run_on_startup", False)
         and "--gui" not in sys.argv
@@ -1100,7 +1113,7 @@ def main():
         return
 
     try:
-        from PySide6 import QtWidgets
+        from PySide6 import QtCore, QtWidgets
     except Exception:
         log("GUI not available, running silently", cfg)
         run_silent(cfg, ask=False)
@@ -1418,6 +1431,31 @@ def main():
             self.update_driver_fields()
             layout.addWidget(drivers_group)
 
+            config_group = QtWidgets.QGroupBox("Configuration management")
+            c_layout = QtWidgets.QVBoxLayout(config_group)
+            self.config_path = self.cfg.get("_config_path", CONFIG_FILE)
+            self.config_path_label = QtWidgets.QLabel(
+                f"Active config: {self.config_path}"
+            )
+            self.config_path_label.setTextInteractionFlags(
+                QtCore.Qt.TextSelectableByMouse
+            )
+            c_layout.addWidget(self.config_path_label)
+
+            cfg_buttons = QtWidgets.QHBoxLayout()
+            import_btn = QtWidgets.QPushButton("Load config…")
+            import_btn.clicked.connect(self.load_config_file)
+            export_btn = QtWidgets.QPushButton("Export current config…")
+            export_btn.clicked.connect(self.export_config_file)
+            reset_btn = QtWidgets.QPushButton("Reset to defaults")
+            reset_btn.clicked.connect(self.reset_to_defaults)
+            cfg_buttons.addWidget(import_btn)
+            cfg_buttons.addWidget(export_btn)
+            cfg_buttons.addWidget(reset_btn)
+            cfg_buttons.addStretch()
+            c_layout.addLayout(cfg_buttons)
+            layout.addWidget(config_group)
+
             self.garage_check.toggled.connect(self.update_garage_fields)
             self.update_garage_fields()
             self.update_mode_fields()
@@ -1600,6 +1638,100 @@ def main():
             self.driver_entry.parent().setVisible(show)
             self.season_entry.parent().setVisible(show)
 
+        def update_config_label(self):
+            self.config_path_label.setText(f"Active config: {self.config_path}")
+
+        def apply_config(self, cfg):
+            self.cfg = cfg
+            self.config_path = cfg.get("_config_path", self.config_path)
+            self.update_config_label()
+            self.iracing_entry.setText(cfg.get("iracing_folder", ""))
+            self.mode_combo.setCurrentText(cfg.get("source_type", "zip"))
+            self.zip_entry.setText(cfg.get("zip_file", ""))
+            self.src_entry.setText(cfg.get("source_folder", ""))
+            self.sync_source_entry.setText(cfg.get("sync_source", ""))
+            self.sync_dest_entry.setText(cfg.get("sync_destination", ""))
+            self.backup_check.setChecked(cfg.get("backup_enabled", False))
+            self.backup_before_entry.setText(
+                cfg.get("backup_before_folder", cfg.get("backup_folder", ""))
+            )
+            self.backup_after_entry.setText(cfg.get("backup_after_folder", ""))
+            for w in (self.backup_before_entry, self.backup_after_entry):
+                w.parent().setVisible(self.backup_check.isChecked())
+
+            self.log_check.setChecked(cfg.get("enable_logging", False))
+            self.log_entry.setText(cfg.get("log_file", ""))
+            self.log_entry.parent().setVisible(self.log_check.isChecked())
+
+            while self.extra_entries:
+                lbl, e, cb = self.extra_entries.pop()
+                lbl.deleteLater()
+                e.deleteLater()
+                cb.deleteLater()
+            self.external_check.setChecked(cfg.get("use_external", False))
+            self.extra_count_spin.setValue(len(cfg.get("extra_folders", [])))
+            self.update_extra_fields()
+            self.update_extra_option_visibility()
+
+            self.algo_combo.setCurrentText(cfg.get("hash_algorithm", "md5"))
+            self.copy_all_check.setChecked(cfg.get("copy_all", False))
+            self.startup_check.setChecked(cfg.get("run_on_startup", False))
+            self.tray_check.setChecked(cfg.get("tray_mode", False))
+            self.interval_spin.setValue(cfg.get("tray_interval", 2))
+
+            self.garage_check.setChecked(cfg.get("use_garage61", False))
+            self.team_id_entry.setText(cfg.get("garage61_team_id", ""))
+            self.api_key_entry.setText(cfg.get("garage61_api_key", ""))
+            while self.driver_entries:
+                lbl, e = self.driver_entries.pop()
+                lbl.deleteLater()
+                e.deleteLater()
+            self.driver_check.setChecked(cfg.get("use_driver_folders", False))
+            self.driver_count_spin.setValue(len(cfg.get("drivers", [])))
+
+            profile_count = max(1, len(cfg.get("profiles", [])))
+            self.profile_count_spin.blockSignals(True)
+            self.profile_count_spin.setValue(profile_count)
+            self.profile_count_spin.blockSignals(False)
+            self.update_profile_count()
+
+            self.garage_check.toggled.emit(self.garage_check.isChecked())
+            self.update_garage_fields()
+            self.update_mode_fields()
+
+        def load_config_file(self):
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Select configuration", filter="JSON Files (*.json);;All Files (*)"
+            )
+            if path:
+                cfg = load_config(path)
+                self.apply_config(cfg)
+                QtWidgets.QMessageBox.information(
+                    self, "Configuration loaded", f"Using settings from {path}"
+                )
+
+        def export_config_file(self):
+            cfg = self.collect_config()
+            path, _ = QtWidgets.QFileDialog.getSaveFileName(
+                self,
+                "Save configuration as",
+                self.config_path,
+                filter="JSON Files (*.json);;All Files (*)",
+            )
+            if path:
+                cfg["_config_path"] = path
+                save_config(cfg, path)
+                self.config_path = path
+                self.update_config_label()
+                QtWidgets.QMessageBox.information(
+                    self, "Configuration saved", f"Configuration written to {path}"
+                )
+
+        def reset_to_defaults(self):
+            cfg = copy.deepcopy(DEFAULT_CONFIG)
+            cfg["_config_path"] = self.config_path
+            self.apply_config(cfg)
+
         def on_copy_toggle(self):
             if self.copy_all_check.isChecked():
                 reply = QtWidgets.QMessageBox.question(
@@ -1659,17 +1791,18 @@ def main():
                 "garage61_api_key": self.api_key_entry.text().strip(),
                 "active_profile": idx,
                 "profiles": self.cfg.get("profiles", []),
+                "_config_path": self.config_path,
             }
 
         def save_and_run(self):
             cfg = self.collect_config()
-            save_config(cfg)
+            save_config(cfg, self.config_path)
             run_silent(cfg, ask=True)
             QtWidgets.QMessageBox.information(self, "Done", "Processing completed")
 
         def save_only(self):
             cfg = self.collect_config()
-            save_config(cfg)
+            save_config(cfg, self.config_path)
             QtWidgets.QMessageBox.information(self, "Saved", "Configuration saved")
 
         def edit_mapping(self):

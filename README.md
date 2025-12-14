@@ -449,6 +449,13 @@ Edit `custom_car_mapping.json`:
 
 Keys are lowercase source folder names, values are iRacing car folder names.
 
+### Custom configuration files
+
+You can now load or export configuration presets directly from the GUI using the
+"Load config…" and "Export current config…" buttons. The "Reset to defaults"
+option reverts every setting to the built-in template. To run the CLI with a
+specific configuration file, pass `--config /path/to/custom_config.json`.
+
 ### Programmatic Usage
 
 Use as a module in your own scripts:
